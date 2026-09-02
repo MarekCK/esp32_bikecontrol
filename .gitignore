@@ -7,4 +7,3 @@
 src/main/wifi_credentials.h
 components/esp-protocols/
 build
-components/mdns
