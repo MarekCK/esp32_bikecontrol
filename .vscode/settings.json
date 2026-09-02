@@ -1,0 +1,12 @@
+{
+  "idf.currentSetup": "/home/marek/.espressif/v6.1/esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c6"
+  },
+  "clangd.path": "/home/marek/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/marek/Dokumenty/PlatformIO/Projects/esp32-bikecontrol-idf/build"
+  ]
+}
