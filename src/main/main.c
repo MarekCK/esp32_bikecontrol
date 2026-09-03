@@ -167,87 +167,40 @@ static bool tcp_started = false;
 
 static void mdns_init_obc(void);
 
-static void tcp_send_button(uint8_t button_id,
-                            uint8_t state)
-{
+static void tcp_send_button(uint8_t button_id, uint8_t state) {
+
+    if (tcp_client_sock < 0) {
+        return;
+    }
+    uint8_t msg[3] = {0x01, button_id, state};
+    int rc = send(tcp_client_sock, msg, sizeof(msg), 0);
+    ESP_LOGI(TAG, "TCP BUTTON TX: rc=%d [%02X %02X %02X]", rc, msg[0], msg[1], msg[2]);
+}
+
+static void tcp_send_status(void) {
+    
     if (tcp_client_sock < 0) {
         return;
     }
 
-    uint8_t msg[3] = {
-        0x01,
-        button_id,
-        state
-    };
-
-    int rc = send(
-        tcp_client_sock,
-        msg,
-        sizeof(msg),
-        0
-    );
-
-    ESP_LOGI(TAG,
-             "TCP BUTTON TX: rc=%d [%02X %02X %02X]",
-             rc,
-             msg[0],
-             msg[1],
-             msg[2]);
+    uint8_t msg[3] = {0x02, 0xFF, 0x01}; // brak baterii / connected / ready
+    int rc = send(tcp_client_sock, msg, sizeof(msg), 0);
+    ESP_LOGI(TAG, "TCP STATUS TX: rc=%d [%02X %02X %02X]", rc, msg[0], msg[1], msg[2]);
 }
 
-static void tcp_send_status(void)
-{
-    if (tcp_client_sock < 0) {
-        return;
-    }
+static void tcp_server_task(void *pvParameters) {
 
-    uint8_t msg[3] = {
-        0x02,
-        0xFF,   // brak baterii
-        0x01    // connected / ready
-    };
-
-    int rc = send(
-        tcp_client_sock,
-        msg,
-        sizeof(msg),
-        0
-    );
-
-    ESP_LOGI(TAG,
-             "TCP STATUS TX: rc=%d [%02X %02X %02X]",
-             rc,
-             msg[0],
-             msg[1],
-             msg[2]);
-}
-
-static void tcp_server_task(void *pvParameters)
-{
     int listen_sock = -1;
-
     struct sockaddr_in server_addr;
-
     listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-
     if (listen_sock < 0) {
-        ESP_LOGE(TAG,
-                 "TCP socket() failed, errno=%d",
-                 errno);
-
+        ESP_LOGE(TAG, "TCP socket() failed, errno=%d", errno);
         vTaskDelete(NULL);
         return;
     }
 
     int opt = 1;
-
-    setsockopt(
-        listen_sock,
-        SOL_SOCKET,
-        SO_REUSEADDR,
-        &opt,
-        sizeof(opt)
-    );
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     memset(&server_addr, 0, sizeof(server_addr));
 
@@ -255,17 +208,10 @@ static void tcp_server_task(void *pvParameters)
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(OBC_TCP_PORT);
 
-    int err = bind(
-        listen_sock,
-        (struct sockaddr *)&server_addr,
-        sizeof(server_addr)
-    );
+    int err = bind(listen_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
     if (err != 0) {
-        ESP_LOGE(TAG,
-                 "TCP bind() failed, errno=%d",
-                 errno);
-
+        ESP_LOGE(TAG, "TCP bind() failed, errno=%d", errno);
         close(listen_sock);
         vTaskDelete(NULL);
         return;
@@ -274,236 +220,108 @@ static void tcp_server_task(void *pvParameters)
     err = listen(listen_sock, 1);
 
     if (err != 0) {
-        ESP_LOGE(TAG,
-                 "TCP listen() failed, errno=%d",
-                 errno);
-
+        ESP_LOGE(TAG, "TCP listen() failed, errno=%d", errno);
         close(listen_sock);
         vTaskDelete(NULL);
         return;
     }
 
-    ESP_LOGI(TAG,
-             "TCP server listening on port %d",
-             OBC_TCP_PORT);
+    ESP_LOGI(TAG, "TCP server listening on port %d", OBC_TCP_PORT);
 
     while (1) {
-
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
-
-        ESP_LOGI(TAG,
-                 "TCP waiting for client...");
-
+        ESP_LOGI(TAG, "TCP waiting for client...");
         int sock = accept(
             listen_sock,
             (struct sockaddr *)&client_addr,
             &client_len
         );
 
-tcp_client_sock = sock;
+        tcp_client_sock = sock;
 
-ESP_LOGI(TAG,
-         "TCP client connected: %s",
-         inet_ntoa(client_addr.sin_addr));
-
-tcp_send_status();        
-
+        ESP_LOGI(TAG, "TCP client connected: %s", inet_ntoa(client_addr.sin_addr));
+        tcp_send_status();        
         if (sock < 0) {
-            ESP_LOGE(TAG,
-                     "TCP accept() failed, errno=%d",
-                     errno);
-
+            ESP_LOGE(TAG, "TCP accept() failed, errno=%d", errno);
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
         tcp_client_sock = sock;
 
-        ESP_LOGI(TAG,
-                 "TCP client connected: %s",
-                 inet_ntoa(client_addr.sin_addr));
+        ESP_LOGI(TAG, "TCP client connected: %s", inet_ntoa(client_addr.sin_addr));
 
         uint8_t rxbuf[128];
 
         while (1) {
-
-            int len = recv(
-                sock,
-                rxbuf,
-                sizeof(rxbuf),
-                0
-            );
-
+            int len = recv(sock, rxbuf, sizeof(rxbuf), 0);
             if (len > 0) {
-
-                ESP_LOGI(TAG,
-                         "TCP RX: %d bytes",
-                         len);
-
-                ESP_LOG_BUFFER_HEX(
-                    TAG,
-                    rxbuf,
-                    len
-                );
-
+                ESP_LOGI(TAG, "TCP RX: %d bytes",len);
+                ESP_LOG_BUFFER_HEX(TAG, rxbuf, len);
             } else if (len == 0) {
-
-                ESP_LOGW(TAG,
-                         "TCP client disconnected");
-
+                ESP_LOGW(TAG, "TCP client disconnected");
                 break;
-
             } else {
-
-                ESP_LOGE(TAG,
-                         "TCP recv() error, errno=%d",
-                         errno);
-
+                ESP_LOGE(TAG, "TCP recv() error, errno=%d", errno);
                 break;
             }
         }
-
         close(sock);
-
         tcp_client_sock = -1;
-
-        ESP_LOGI(TAG,
-                 "TCP connection closed");
+        ESP_LOGI(TAG, "TCP connection closed");
     }
 }
 
-static void wifi_event_handler(void *arg,
-                               esp_event_base_t event_base,
-                               int32_t event_id,
-                               void *event_data)
-{
-    if (event_base == WIFI_EVENT &&
-        event_id == WIFI_EVENT_STA_START) {
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
 
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     }
 
-    if (event_base == WIFI_EVENT &&
-        event_id == WIFI_EVENT_STA_DISCONNECTED) {
-
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "WiFi disconnected - reconnecting");
         esp_wifi_connect();
     }
 
-    if (event_base == IP_EVENT &&
-        event_id == IP_EVENT_STA_GOT_IP) {
-
-        ip_event_got_ip_t *event =
-            (ip_event_got_ip_t *)event_data;
-
-        ESP_LOGI(TAG,
-                "WiFi connected, IP=" IPSTR,
-                IP2STR(&event->ip_info.ip));
-
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        ESP_LOGI(TAG, "WiFi connected, IP=" IPSTR, IP2STR(&event->ip_info.ip));
         if (!mdns_started) {
             mdns_init_obc();
             mdns_started = true;
         }
-
         if (!tcp_started) {
-            xTaskCreate(
-                tcp_server_task,
-                "tcp_server_task",
-                4096,
-                NULL,
-                5,
-                NULL
-            );
-
+            xTaskCreate(tcp_server_task, "tcp_server_task", 4096, NULL, 5, NULL);
             tcp_started = true;
         }
     }
 }
 
-static void wifi_init(void)
-{
+static void wifi_init(void) {
+
     ESP_ERROR_CHECK(esp_netif_init());
-
-    ESP_ERROR_CHECK(
-        esp_event_loop_create_default()
-    );
-
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg =
-        WIFI_INIT_CONFIG_DEFAULT();
-
-    ESP_ERROR_CHECK(
-        esp_wifi_init(&cfg)
-    );
-
-    ESP_ERROR_CHECK(
-        esp_event_handler_register(
-            WIFI_EVENT,
-            ESP_EVENT_ANY_ID,
-            &wifi_event_handler,
-            NULL)
-    );
-
-    ESP_ERROR_CHECK(
-        esp_event_handler_register(
-            IP_EVENT,
-            IP_EVENT_STA_GOT_IP,
-            &wifi_event_handler,
-            NULL)
-    );
-
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
     wifi_config_t wifi_config = {0};
-
-    strcpy(
-        (char *)wifi_config.sta.ssid,
-        WIFI_SSID
-    );
-
-    strcpy(
-        (char *)wifi_config.sta.password,
-        WIFI_PASS
-    );
-
-    ESP_ERROR_CHECK(
-        esp_wifi_set_mode(WIFI_MODE_STA)
-    );
-
-    ESP_ERROR_CHECK(
-        esp_wifi_set_config(
-            WIFI_IF_STA,
-            &wifi_config)
-    );
-
-    ESP_ERROR_CHECK(
-        esp_wifi_start()
-    );
+    strcpy((char *)wifi_config.sta.ssid, WIFI_SSID);
+    strcpy((char *)wifi_config.sta.password, WIFI_PASS);
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static void mdns_init_obc(void)
-{
+static void mdns_init_obc(void) {
+    
     ESP_ERROR_CHECK(mdns_init());
-
-    ESP_ERROR_CHECK(
-        mdns_hostname_set("esp32-bikecontrol")
+    ESP_ERROR_CHECK(mdns_hostname_set("esp32-bikecontrol"));
+    ESP_ERROR_CHECK(mdns_instance_name_set("ESP32 BikeControl"));
+    ESP_ERROR_CHECK(mdns_service_add( "ESP32 BikeControl", "_openbikecontrol", "_tcp", OBC_TCP_PORT, NULL, 0)
     );
-
-    ESP_ERROR_CHECK(
-        mdns_instance_name_set(
-            "ESP32 BikeControl")
-    );
-
-    ESP_ERROR_CHECK(
-        mdns_service_add(
-            "ESP32 BikeControl",
-            "_openbikecontrol",
-            "_tcp",
-            OBC_TCP_PORT,
-            NULL,
-            0)
-    );
-
     mdns_txt_item_t txt[] = {
         {"id", "1337"},
         {"manufacturer", "ESP32"},
@@ -515,54 +333,24 @@ static void mdns_init_obc(void)
         },
         {"version", "0x01"}
     };
-
-    ESP_ERROR_CHECK(
-        mdns_service_txt_set(
-            "_openbikecontrol",
-            "_tcp",
-            txt,
-            sizeof(txt) / sizeof(txt[0]))
-    );
-
-    ESP_LOGI(TAG,
-             "mDNS: _openbikecontrol._tcp port=%d",
-             OBC_TCP_PORT);
+    ESP_ERROR_CHECK(mdns_service_txt_set("_openbikecontrol", "_tcp",txt, sizeof(txt) / sizeof(txt[0])));
+    ESP_LOGI(TAG, "mDNS: _openbikecontrol._tcp port=%d", OBC_TCP_PORT);
 }
 
 
+static void gatt_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {
 
-
-
-
-/************************************ */
-static void gatt_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg)
-{
     char uuid_str[BLE_UUID_STR_LEN];
-
     switch (ctxt->op) {
-
-    case BLE_GATT_REGISTER_OP_SVC:
-        ESP_LOGI(TAG,
-                 "REGISTER SVC: handle=%d uuid=%s",
-                 ctxt->svc.handle,
-                 ble_uuid_to_str(ctxt->svc.svc_def->uuid, uuid_str));
+        case BLE_GATT_REGISTER_OP_SVC:
+            ESP_LOGI(TAG, "REGISTER SVC: handle=%d uuid=%s", ctxt->svc.handle, ble_uuid_to_str(ctxt->svc.svc_def->uuid, uuid_str));
         break;
-
-    case BLE_GATT_REGISTER_OP_CHR:
-        ESP_LOGI(TAG,
-                 "REGISTER CHR: def_handle=%d val_handle=%d uuid=%s",
-                 ctxt->chr.def_handle,
-                 ctxt->chr.val_handle,
-                 ble_uuid_to_str(ctxt->chr.chr_def->uuid, uuid_str));
+        case BLE_GATT_REGISTER_OP_CHR:
+            ESP_LOGI(TAG, "REGISTER CHR: def_handle=%d val_handle=%d uuid=%s", ctxt->chr.def_handle, ctxt->chr.val_handle, ble_uuid_to_str(ctxt->chr.chr_def->uuid, uuid_str));
         break;
-
-    case BLE_GATT_REGISTER_OP_DSC:
-        ESP_LOGI(TAG,
-                 "REGISTER DSC: handle=%d uuid=%s",
-                 ctxt->dsc.handle,
-                 ble_uuid_to_str(ctxt->dsc.dsc_def->uuid, uuid_str));
+        case BLE_GATT_REGISTER_OP_DSC:
+            ESP_LOGI(TAG, "REGISTER DSC: handle=%d uuid=%s", ctxt->dsc.handle, ble_uuid_to_str(ctxt->dsc.dsc_def->uuid, uuid_str));
         break;
-
     default:
         break;
     }
@@ -571,32 +359,17 @@ static void gatt_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg)
 /* GATT access callback                                                */
 /* ------------------------------------------------------------------ */
 
-static int gatt_access_cb(uint16_t conn_handle,
-               uint16_t attr_handle,
-               struct ble_gatt_access_ctxt *ctxt,
-               void *arg)
-{
+static int gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
 
-    ESP_LOGI(TAG,
-             "GATT access: conn=%u attr=%u op=%d",
-             conn_handle,
-             attr_handle,
-             ctxt->op);
+    ESP_LOGI(TAG, "GATT access: conn=%u attr=%u op=%d", conn_handle, attr_handle, ctxt->op);
 
     // TEST: akceptujemy KAŻDY WRITE
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
 
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
-
-        ESP_LOGI(TAG,
-                 "GATT WRITE ACCEPTED: conn=%u attr=%u len=%u",
-                 conn_handle,
-                 attr_handle,
-                 len);
-
+        ESP_LOGI(TAG, "GATT WRITE ACCEPTED: conn=%u attr=%u len=%u", conn_handle, attr_handle, len);
         return 0;
     }
-
 
     if (ctxt->chr != NULL) {
 
@@ -604,19 +377,10 @@ static int gatt_access_cb(uint16_t conn_handle,
         /* OpenBikeControl - Button State                             */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &obc_button_uuid.u) == 0) {
-
+        if (ble_uuid_cmp(ctxt->chr->uuid, &obc_button_uuid.u) == 0) {
             if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-
-                int rc = os_mbuf_append(
-                    ctxt->om,
-                    button_state,
-                    sizeof(button_state));
-
-                return rc == 0
-                    ? 0
-                    : BLE_ATT_ERR_INSUFFICIENT_RES;
+                int rc = os_mbuf_append(ctxt->om, button_state, sizeof(button_state));
+                return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
             }
         }
 
@@ -624,15 +388,9 @@ static int gatt_access_cb(uint16_t conn_handle,
         /* OpenBikeControl - Haptic                                   */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &obc_haptic_uuid.u) == 0) {
-
+        if (ble_uuid_cmp(ctxt->chr->uuid, &obc_haptic_uuid.u) == 0) {
             if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-
-                ESP_LOGI(TAG,
-                         "Haptic write received (%d bytes)",
-                         OS_MBUF_PKTLEN(ctxt->om));
-
+                ESP_LOGI(TAG, "Haptic write received (%d bytes)", OS_MBUF_PKTLEN(ctxt->om));
                 return 0;
             }
         }
@@ -641,15 +399,9 @@ static int gatt_access_cb(uint16_t conn_handle,
         /* OpenBikeControl - App Information                          */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &obc_app_info_uuid.u) == 0) {
-
+        if (ble_uuid_cmp(ctxt->chr->uuid, &obc_app_info_uuid.u) == 0) {
             if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-
-                ESP_LOGI(TAG,
-                         "App info write received (%d bytes)",
-                         OS_MBUF_PKTLEN(ctxt->om));
-
+                ESP_LOGI(TAG, "App info write received (%d bytes)", OS_MBUF_PKTLEN(ctxt->om));
                 return 0;
             }
         }
@@ -658,87 +410,48 @@ static int gatt_access_cb(uint16_t conn_handle,
         /* Device Information - Model Number                          */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &dis_model_uuid.u) == 0) {
-
-            return os_mbuf_append(
-                ctxt->om,
-                dis_model,
-                strlen(dis_model)) == 0
-                ? 0
-                : BLE_ATT_ERR_INSUFFICIENT_RES;
+        if (ble_uuid_cmp(ctxt->chr->uuid, &dis_model_uuid.u) == 0) {
+            return os_mbuf_append(ctxt->om, dis_model, strlen(dis_model)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
         }
 
         /* ---------------------------------------------------------- */
         /* Device Information - Serial Number                         */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &dis_serial_uuid.u) == 0) {
-
-            return os_mbuf_append(
-                ctxt->om,
-                dis_serial,
-                strlen(dis_serial)) == 0
-                ? 0
-                : BLE_ATT_ERR_INSUFFICIENT_RES;
+        if (ble_uuid_cmp(ctxt->chr->uuid, &dis_serial_uuid.u) == 0) {
+            return os_mbuf_append(ctxt->om, dis_serial, strlen(dis_serial)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
         }
 
         /* ---------------------------------------------------------- */
         /* Device Information - Firmware Revision                     */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &dis_firmware_uuid.u) == 0) {
-
-            return os_mbuf_append(
-                ctxt->om,
-                dis_firmware,
-                strlen(dis_firmware)) == 0
-                ? 0
-                : BLE_ATT_ERR_INSUFFICIENT_RES;
+        if (ble_uuid_cmp(ctxt->chr->uuid, &dis_firmware_uuid.u) == 0) {
+            return os_mbuf_append(ctxt->om, dis_firmware, strlen(dis_firmware)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
         }
 
         /* ---------------------------------------------------------- */
         /* Device Information - Hardware Revision                     */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &dis_hardware_uuid.u) == 0) {
-
-            return os_mbuf_append(
-                ctxt->om,
-                dis_hardware,
-                strlen(dis_hardware)) == 0
-                ? 0
-                : BLE_ATT_ERR_INSUFFICIENT_RES;
+        if (ble_uuid_cmp(ctxt->chr->uuid, &dis_hardware_uuid.u) == 0) {
+            return os_mbuf_append(ctxt->om, dis_hardware, strlen(dis_hardware)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
         }
 
         /* ---------------------------------------------------------- */
         /* Device Information - Manufacturer Name                     */
         /* ---------------------------------------------------------- */
 
-        if (ble_uuid_cmp(ctxt->chr->uuid,
-                         &dis_manufacturer_uuid.u) == 0) {
+        if (ble_uuid_cmp(ctxt->chr->uuid, &dis_manufacturer_uuid.u) == 0) {
 
-            return os_mbuf_append(
-                ctxt->om,
-                dis_manufacturer,
-                strlen(dis_manufacturer)) == 0
-                ? 0
-                : BLE_ATT_ERR_INSUFFICIENT_RES;
+            return os_mbuf_append(ctxt->om, dis_manufacturer, strlen(dis_manufacturer)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
         }
     }
 
     (void)conn_handle;
     (void)attr_handle;
     (void)arg;
-ESP_LOGE(TAG,
-         "GATT UNLIKELY ERROR: conn=%u attr=%u op=%d",
-         conn_handle,
-         attr_handle,
-         ctxt->op);
-
+    ESP_LOGE(TAG, "GATT UNLIKELY ERROR: conn=%u attr=%u op=%d", conn_handle, attr_handle, ctxt->op);
     return BLE_ATT_ERR_UNLIKELY;
 }
 
@@ -842,214 +555,113 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     { 0 }
 };
 
-static void send_button(uint8_t button_id, uint8_t state)
-{
+static void send_button(uint8_t button_id, uint8_t state) {
     button_state[0] = 0x01;
     button_state[1] = button_id;
     button_state[2] = state;
-if (current_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(
-        button_state,
-        sizeof(button_state)
-    );
-
-    if (om != NULL) {
-        int rc = ble_gatts_notify_custom(
-            current_conn_handle,
-            button_state_handle,
-            om
-        );
-
-        ESP_LOGI(TAG,
-                 "NOTIFY_CUSTOM: conn=%d attr=%d rc=%d -> [%02X %02X %02X]",
-                 current_conn_handle,
-                 button_state_handle,
-                 rc,
-                 button_state[0],
-                 button_state[1],
-                 button_state[2]);
+    if (current_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(button_state, sizeof(button_state));
+        if (om != NULL) {
+            int rc = ble_gatts_notify_custom(current_conn_handle, button_state_handle, om);
+            ESP_LOGI(TAG, "NOTIFY_CUSTOM: conn=%d attr=%d rc=%d ", current_conn_handle, button_state_handle, rc);
+        }
     }
 }
 
 
-    // struct os_mbuf *om = ble_hs_mbuf_from_flat(
-    //     button_state,
-    //     sizeof(button_state)
-    // );
-
-    // if (om == NULL) {
-    //     ESP_LOGE(TAG, "Failed to allocate mbuf");
-    //     return;
-    // }
-
-    // int rc = ble_gatts_notify_custom(
-    //     current_conn_handle,
-    //     button_state_handle,
-    //     om
-    // );
-
-    // ESP_LOGI(TAG,
-    //          "NOTIFY_CUSTOM: conn=%d attr=%d rc=%d -> [%02X %02X %02X]",
-    //          current_conn_handle,
-    //          button_state_handle,
-    //          rc,
-    //          button_state[0],
-    //          button_state[1],
-    //          button_state[2]);
-}
-
-
 static void
-send_shift(uint8_t shift_id)
-{
+send_shift(uint8_t shift_id) {
     /* Press */
     send_button(shift_id, 0x01);
-
     /* Short separation between press and release. */
     vTaskDelay(pdMS_TO_TICKS(50));
-
     /* Release */
     send_button(shift_id, 0x00);
-
-tcp_send_button(shift_id, 0x01);
-vTaskDelay(pdMS_TO_TICKS(50));
-tcp_send_button(shift_id, 0x00);    
-
+    tcp_send_button(shift_id, 0x01);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    tcp_send_button(shift_id, 0x00);    
 }
 
 /* ------------------------------------------------------------------ */
 /* GAP / advertising                                                    */
 /* ------------------------------------------------------------------ */
 
-static void
-start_advertising(void);
+static void start_advertising(void);
 
-static int
-gap_event_handler(struct ble_gap_event *event, void *arg)
-{
+static int gap_event_handler(struct ble_gap_event *event, void *arg) {
+
     (void)arg;
     ESP_LOGI(TAG, "GAP event: type=%d", event->type);
-
     switch (event->type) {
-
-    case BLE_GAP_EVENT_NOTIFY_TX:
-        ESP_LOGI(TAG,
-                "NOTIFY_TX: conn=%d attr=%d status=%d indication=%d",
-                event->notify_tx.conn_handle,
-                event->notify_tx.attr_handle,
-                event->notify_tx.status,
-                event->notify_tx.indication);
+        case BLE_GAP_EVENT_NOTIFY_TX:
+            ESP_LOGI(TAG, "NOTIFY_TX: conn=%d attr=%d status=%d indication=%d",
+                    event->notify_tx.conn_handle,
+                    event->notify_tx.attr_handle,
+                    event->notify_tx.status,
+                    event->notify_tx.indication);
         return 0;
-
-    case BLE_GAP_EVENT_CONNECT:
-
-        if (event->connect.status == 0) {
-            current_conn_handle = event->connect.conn_handle;
-
-            ESP_LOGI(TAG,
-                    "BLE connected, handle=%d",
-                    current_conn_handle);
-
-        } else {
-            ESP_LOGW(TAG,
-                     "BLE connection failed, status=%d",
-                     event->connect.status);
-
+        case BLE_GAP_EVENT_CONNECT:
+            if (event->connect.status == 0) {
+                current_conn_handle = event->connect.conn_handle;
+                ESP_LOGI(TAG, "BLE connected, handle=%d", current_conn_handle);
+            } else {
+                ESP_LOGW(TAG, "BLE connection failed, status=%d", event->connect.status);
+                start_advertising();
+            }
+        return 0;
+        case BLE_GAP_EVENT_DISCONNECT:
+            ble_connected = false;
+            current_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            ESP_LOGI(TAG, "BLE disconnected, reason=%d", event->disconnect.reason);
             start_advertising();
-        }
         return 0;
 
-    case BLE_GAP_EVENT_DISCONNECT:
-        ble_connected = false;
-
-        current_conn_handle = BLE_HS_CONN_HANDLE_NONE;
-
-        ESP_LOGI(TAG,
-                 "BLE disconnected, reason=%d",
-                 event->disconnect.reason);
-
-        start_advertising();
+        case BLE_GAP_EVENT_ADV_COMPLETE:
+            ESP_LOGI(TAG, "Advertising complete");
+            start_advertising();
         return 0;
 
-    case BLE_GAP_EVENT_ADV_COMPLETE:
-        ESP_LOGI(TAG, "Advertising complete");
-        start_advertising();
+        case BLE_GAP_EVENT_SUBSCRIBE:
+            ESP_LOGI(TAG, "SUBSCRIBE: conn=%d attr=%d reason=%d prev_notify=%d cur_notify=%d prev_indicate=%d cur_indicate=%d",
+                event->subscribe.conn_handle,
+                event->subscribe.attr_handle,
+                event->subscribe.reason,
+                event->subscribe.prev_notify,
+                event->subscribe.cur_notify,
+                event->subscribe.prev_indicate,
+                event->subscribe.cur_indicate);
         return 0;
 
-    case BLE_GAP_EVENT_SUBSCRIBE:
-        ESP_LOGI(TAG,
-            "SUBSCRIBE: conn=%d attr=%d reason=%d "
-            "prev_notify=%d cur_notify=%d "
-            "prev_indicate=%d cur_indicate=%d",
-            event->subscribe.conn_handle,
-            event->subscribe.attr_handle,
-            event->subscribe.reason,
-            event->subscribe.prev_notify,
-            event->subscribe.cur_notify,
-            event->subscribe.prev_indicate,
-            event->subscribe.cur_indicate);
+        case BLE_GAP_EVENT_MTU:
+            ESP_LOGI(TAG, "MTU update: conn=%d mtu=%d",
+                    event->mtu.conn_handle,
+                    event->mtu.value);
         return 0;
-
-    case BLE_GAP_EVENT_MTU:
-        ESP_LOGI(TAG,
-                 "MTU update: conn=%d mtu=%d",
-                 event->mtu.conn_handle,
-                 event->mtu.value);
-        return 0;
-
     default:
         return 0;
     }
 }
 
 static void
-start_advertising(void)
-{
+start_advertising(void) {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields fields;
 
-    memset(&fields, 0, sizeof(fields));
 
     /*
      * Generic discoverable, BLE only.
      */
-    fields.flags = BLE_HS_ADV_F_DISC_GEN |
-                   BLE_HS_ADV_F_BREDR_UNSUP;
 
-    /*
-     * Device name.
-     */
-    // const char *name = "ESP32 BikeControl";
-
-    // fields.name = (uint8_t *)name;
-    // fields.name_len = strlen(name);
-    // fields.name_is_complete = 1;
-
-    // /*
-    //  * Advertise the OpenBikeControl service UUID.
-    //  */
-    // fields.uuids128 = (ble_uuid128_t *)&obc_service_uuid;
-    // fields.num_uuids128 = 1;
-    // fields.uuids128_is_complete = 1;
-
-
-
-memset(&fields, 0, sizeof(fields));
-
-fields.flags = BLE_HS_ADV_F_DISC_GEN |
-               BLE_HS_ADV_F_BREDR_UNSUP;
-
-fields.uuids128 = (ble_uuid128_t *)&obc_service_uuid;
-fields.num_uuids128 = 1;
-fields.uuids128_is_complete = 1;
+    memset(&fields, 0, sizeof(fields));
+    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.uuids128 = (ble_uuid128_t *)&obc_service_uuid;
+    fields.num_uuids128 = 1;
+    fields.uuids128_is_complete = 1;
 
     int rc = ble_gap_adv_set_fields(&fields);
 
     if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_gap_adv_set_fields failed: rc=%d",
-                 rc);
+        ESP_LOGE(TAG, "ble_gap_adv_set_fields failed: rc=%d", rc);
         return;
     }
 
@@ -1058,18 +670,9 @@ fields.uuids128_is_complete = 1;
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
-    rc = ble_gap_adv_start(
-        own_addr_type,
-        NULL,
-        BLE_HS_FOREVER,
-        &adv_params,
-        gap_event_handler,
-        NULL);
-
+    rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, gap_event_handler, NULL);
     if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_gap_adv_start failed: rc=%d",
-                 rc);
+        ESP_LOGE(TAG, "ble_gap_adv_start failed: rc=%d", rc);
     } else {
         ESP_LOGI(TAG, "Advertising started");
         ESP_LOGI(TAG, "Name: ESP32 BikeControl");
@@ -1082,41 +685,31 @@ fields.uuids128_is_complete = 1;
 /* ------------------------------------------------------------------ */
 
 static void
-on_sync(void)
-{
+on_sync(void) {
+
     int rc;
     /*
      * Infer an address type that the controller can use for advertising.
      */
     rc = ble_hs_id_infer_auto(0, &own_addr_type);
-
     if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_hs_id_infer_auto failed: rc=%d",
-                 rc);
+        ESP_LOGE(TAG, "ble_hs_id_infer_auto failed: rc=%d", rc);
         return;
     }
-
     start_advertising();
 }
 
 static void
-on_reset(int reason)
-{
-    ESP_LOGE(TAG,
-             "NimBLE host reset, reason=%d",
-             reason);
+on_reset(int reason) {
+    ESP_LOGE(TAG, "NimBLE host reset, reason=%d", reason);
 }
 
 static void
-nimble_host_task(void *param)
-{
+nimble_host_task(void *param) {
+
     (void)param;
-
     ESP_LOGI(TAG, "NimBLE host task started");
-
     nimble_port_run();
-
     nimble_port_freertos_deinit();
     vTaskDelete(NULL);
 }
@@ -1125,21 +718,18 @@ nimble_host_task(void *param)
 /* Button task                                                          */
 /* ------------------------------------------------------------------ */
 static void
-button_task(void *arg)
-{
+button_task(void *arg) {
+
     bool pressed = false;
     TickType_t press_start = 0;
     bool shift_up_sent = false;
-
     while (1) {
         int level = gpio_get_level(BOOT_GPIO);
-
         /* BOOT pressed */
         if (level == 0 && !pressed) {
             pressed = true;
             press_start = xTaskGetTickCount();
             shift_up_sent = false;
-
             ESP_LOGI(TAG, "BOOT pressed");
         }
 
@@ -1148,35 +738,21 @@ button_task(void *arg)
             TickType_t elapsed = xTaskGetTickCount() - press_start;
             uint32_t elapsed_ms = pdTICKS_TO_MS(elapsed);
 
-            /* > 3 seconds -> SHIFT UP once */
-            if (elapsed_ms >= 1500 && !shift_up_sent) {
+            /* > 1 seconds -> SHIFT UP once */
+            if (elapsed_ms >= 1000 && !shift_up_sent) {
                 send_shift(0x01);
                 shift_up_sent = true;
-
-                ESP_LOGI(TAG, "BOOT held >3s -> SHIFT UP");
+                ESP_LOGI(TAG, "BOOT held >1s -> SHIFT UP");
             }
-
             /* Button released */
             if (level != 0) {
                 pressed = false;
-
                 if (elapsed_ms < 1000) {
                     send_shift(0x02);
-
-                    ESP_LOGI(TAG,
-                             "BOOT <2s -> SHIFT DOWN");
+                    ESP_LOGI(TAG, "BOOT <2s -> SHIFT DOWN");
                 }
-                // else if (elapsed_ms < 3000) {
-                //     ESP_LOGI(TAG,
-                //              "BOOT 2..3s -> no action");
-                // }
             }
         }
-
-        /*
-         * Very important:
-         * give CPU time to IDLE / NimBLE / watchdog.
-         */
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -1185,25 +761,15 @@ button_task(void *arg)
 /* ------------------------------------------------------------------ */
 
 static void
-gatt_svr_init(void)
-{
+gatt_svr_init(void) {
+
     int rc;
-
     rc = ble_gatts_count_cfg(gatt_svr_svcs);
-
-    if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_gatts_count_cfg failed: rc=%d",
-                 rc);
+    if (rc != 0) {ESP_LOGE(TAG, "ble_gatts_count_cfg failed: rc=%d", rc);
         abort();
     }
-
     rc = ble_gatts_add_svcs(gatt_svr_svcs);
-
-    if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_gatts_add_svcs failed: rc=%d",
-                 rc);
+    if (rc != 0) {ESP_LOGE(TAG, "ble_gatts_add_svcs failed: rc=%d", rc);
         abort();
     }
 }
@@ -1221,26 +787,16 @@ vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_LOGI(TAG, " ESP32 BikeControl");
     ESP_LOGI(TAG, " ESP-IDF + native NimBLE");
     ESP_LOGI(TAG, "====================================");
-    ESP_LOGI(TAG, "BOOT <2s  -> SHIFT DOWN");
-    ESP_LOGI(TAG, "BOOT >3s  -> SHIFT UP");
-    ESP_LOGI(TAG, "2..3s     -> no action");
-
+    ESP_LOGI(TAG, "FreeRTOS version: %s", tskKERNEL_VERSION_NUMBER);
     /* NVS is required by the Bluetooth stack. */
     esp_err_t ret = nvs_flash_init();
-
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-
     ESP_ERROR_CHECK(ret);
-
-
     printf("NVS initialized\n");
     wifi_init();
-
     /* BOOT button on ESP32-C6-DevKitC-1. */
     gpio_config_t io = {
         .pin_bit_mask = (1ULL << BOOT_GPIO),
@@ -1249,57 +805,40 @@ vTaskDelay(pdMS_TO_TICKS(1000));
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
-
     ESP_ERROR_CHECK(gpio_config(&io));
-
     /*
      * IMPORTANT:
      * Initialize NimBLE BEFORE configuring GAP/GATT.
      */
     ESP_ERROR_CHECK(nimble_port_init());
-
     /*
      * GAP/GATT services.
      */
     ble_svc_gap_init();
     ble_svc_gatt_init();
-
     /*
      * Configure our OpenBikeControl GATT database.
      */
     gatt_svr_init();
-
     /*
      * Device name.
      */
     int rc = ble_svc_gap_device_name_set("ESP32 BikeControl");
-
     if (rc != 0) {
-        ESP_LOGE(TAG,
-                 "ble_svc_gap_device_name_set failed: rc=%d",
-                 rc);
+        ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: rc=%d", rc);
     }
-
     /*
      * NimBLE host callbacks.
      */
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
     ble_hs_cfg.gatts_register_cb = gatt_register_cb;
-
     /*
      * Start NimBLE host task.
      */
     nimble_port_freertos_init(nimble_host_task);
-
     /*
      * Start the physical BOOT button task.
      */
-    xTaskCreate(
-        button_task,
-        "button_task",
-        4096,
-        NULL,
-        5,
-        NULL);
+    xTaskCreate(button_task, "button_task", 4096, NULL, 5, NULL);
 }
