@@ -5,9 +5,8 @@
  *
  * Minimal OpenBikeControl controller:
  *
- *   BOOT < 2 s  -> SHIFT DOWN (Button ID 0x02)
- *   BOOT > 3 s  -> SHIFT UP   (Button ID 0x01)
- *   2..3 s       -> no action
+ *   BOOT < 1 s  -> SHIFT DOWN (Button ID 0x02)
+ *   BOOT > 1 s  -> SHIFT UP   (Button ID 0x01)
  *
  * One action is generated per physical press.
  *
@@ -61,10 +60,6 @@ static const char *TAG = "BIKECONTROL";
 #define OBC_TCP_PORT 36867
 
 #define BOOT_GPIO              GPIO_NUM_9
-
-#define SHORT_PRESS_MAX_MS     2000
-#define LONG_PRESS_MS          3000
-#define DEBOUNCE_MS            30
 
 #define SHIFT_UP               0x01
 #define SHIFT_DOWN             0x02
@@ -642,8 +637,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
     }
 }
 
-static void
-start_advertising(void) {
+static void start_advertising(void) {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields fields;
 
@@ -684,8 +678,7 @@ start_advertising(void) {
 /* NimBLE synchronization                                               */
 /* ------------------------------------------------------------------ */
 
-static void
-on_sync(void) {
+static void on_sync(void) {
 
     int rc;
     /*
@@ -717,8 +710,7 @@ nimble_host_task(void *param) {
 /* ------------------------------------------------------------------ */
 /* Button task                                                          */
 /* ------------------------------------------------------------------ */
-static void
-button_task(void *arg) {
+static void button_task(void *arg) {
 
     bool pressed = false;
     TickType_t press_start = 0;
@@ -739,7 +731,7 @@ button_task(void *arg) {
             uint32_t elapsed_ms = pdTICKS_TO_MS(elapsed);
 
             /* > 1 seconds -> SHIFT UP once */
-            if (elapsed_ms >= 1000 && !shift_up_sent) {
+            if (elapsed_ms > 1000 && !shift_up_sent) {
                 send_shift(0x01);
                 shift_up_sent = true;
                 ESP_LOGI(TAG, "BOOT held >1s -> SHIFT UP");
@@ -760,8 +752,7 @@ button_task(void *arg) {
 /* GATT init                                                            */
 /* ------------------------------------------------------------------ */
 
-static void
-gatt_svr_init(void) {
+static void gatt_svr_init(void) {
 
     int rc;
     rc = ble_gatts_count_cfg(gatt_svr_svcs);
@@ -778,10 +769,9 @@ gatt_svr_init(void) {
 /* ------------------------------------------------------------------ */
 /* app_main                                                             */
 /* ------------------------------------------------------------------ */
-void
-app_main(void)
-{
-vTaskDelay(pdMS_TO_TICKS(1000));
+void app_main(void) {
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
     
     ESP_LOGI(TAG, "====================================");
     ESP_LOGI(TAG, " ESP32 BikeControl");
