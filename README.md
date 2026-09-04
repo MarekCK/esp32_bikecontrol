@@ -4,11 +4,12 @@ Minimal OpenBikeControl controller for ESP32-C6-DevKitC-1.
 
 ## Controls
 
-- BOOT < 2 s -> SHIFT DOWN (0x02)
-- BOOT > 3 s -> SHIFT UP (0x01)
+- BOOT < 1 s -> SHIFT DOWN (0x02)
+- BOOT > 1 s -> SHIFT UP (0x01)
 - 2..3 s -> no action
 
-A long press sends SHIFT UP once at 3 seconds.
+
+It uses TCP, but you need BLE when connecting!
 
 ## BLE
 
