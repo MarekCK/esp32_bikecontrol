@@ -6,11 +6,12 @@ Minimal OpenBikeControl controller for ESP32-C6-DevKitC-1.
 
 - BOOT < 1 s -> SHIFT DOWN (0x02)
 - BOOT > 1 s -> SHIFT UP (0x01)
-- 2..3 s -> no action
+- BOOT > 2 s  -> 3 x SHIFT UP
+
 
 
 It uses TCP, but you need BLE when connecting!
-
+WiFi credentials in wifi_credentials.h file
 ## BLE
 
 OpenBikeControl service:

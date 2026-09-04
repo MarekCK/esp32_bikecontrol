@@ -7,8 +7,7 @@
  *
  *   BOOT < 1 s  -> SHIFT DOWN (Button ID 0x02)
  *   BOOT > 1 s  -> SHIFT UP   (Button ID 0x01)
- *
- * One action is generated per physical press.
+ *   BOOT > 2 s  -> 3 x SHIFT UP
  *
  * Hardware:
  *   ESP32-C6-DevKitC-1
@@ -60,11 +59,11 @@ static const char *TAG = "BIKECONTROL";
 #define BOOT_GPIO              GPIO_NUM_9
 #define SHIFT_UP               0x01
 #define SHIFT_DOWN             0x02
-#define MSG_BUTTON_STATE 0x01
-
-#define LONG_PRESS_MS      1000
-#define BUTTON_POLL_MS       20
-#define BUTTON_RELEASE_MS    50
+#define MSG_BUTTON_STATE       0x01
+#define LONG_PRESS_MS          1000
+#define VERY_LONG_PRESS_MS     2000
+#define BUTTON_POLL_MS         20
+#define BUTTON_RELEASE_MS      50
 
 static volatile int tcp_client_sock = -1;
 
@@ -136,21 +135,39 @@ static uint16_t current_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint8_t button_state[3] = { MSG_BUTTON_STATE, 0x00, 0x00 };
 
 static uint8_t own_addr_type;
-// static bool ble_connected = false;
 static bool notify_enabled = false;
 
 static const char *dis_model = "ESP32-C6";
 static const char *dis_serial = "98A3169EF04042";
-static const char *dis_firmware = "0.1.0";
+static const char *dis_firmware = "1.0.0";
 static const char *dis_hardware = "ESP32-C6-DevKitC-1";
 static const char *dis_manufacturer = "OpenBikeControl";
 
-/*********************************wifi  */
+/********************************* WiFi  ************************************/
 
 static bool mdns_started = false;
 static bool tcp_started = false;
 
-static void mdns_init_obc(void);
+static void mdns_init_obc(void) {
+    
+    ESP_ERROR_CHECK(mdns_init());
+    ESP_ERROR_CHECK(mdns_hostname_set("esp32-bikecontrol"));
+    ESP_ERROR_CHECK(mdns_instance_name_set("ESP32 BikeControl"));
+    ESP_ERROR_CHECK(mdns_service_add( "ESP32 BikeControl", "_openbikecontrol", "_tcp", OBC_TCP_PORT, NULL, 0));
+    mdns_txt_item_t txt[] = {
+        {"id", "1337"},
+        {"manufacturer", "ESP32"},
+        {"model", "BikeControl"},
+        {"name", "ESP32 BikeControl"},
+        {
+            "service-uuids",
+            "d273f680-d548-419d-b9d1-fa0472345229"
+        },
+        {"version", "0x01"}
+    };
+    ESP_ERROR_CHECK(mdns_service_txt_set("_openbikecontrol", "_tcp",txt, sizeof(txt) / sizeof(txt[0])));
+    ESP_LOGI(TAG, "mDNS: _openbikecontrol._tcp port=%d", OBC_TCP_PORT);
+}
 
 static void tcp_send_button(uint8_t button_id, uint8_t state) {
 
@@ -171,7 +188,6 @@ static void tcp_send_status(void) {
     if (tcp_client_sock < 0) {
         return;
     }
-
     uint8_t msg[3] = {0x02, 0xFF, 0x01}; // brak baterii / connected / ready
     ssize_t rc = send(tcp_client_sock, msg, sizeof(msg), 0);
     ESP_LOGI(TAG, "TCP STATUS TX: rc=%d [%02X %02X %02X]", rc, msg[0], msg[1], msg[2]);
@@ -297,28 +313,6 @@ static void wifi_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 }
-
-static void mdns_init_obc(void) {
-    
-    ESP_ERROR_CHECK(mdns_init());
-    ESP_ERROR_CHECK(mdns_hostname_set("esp32-bikecontrol"));
-    ESP_ERROR_CHECK(mdns_instance_name_set("ESP32 BikeControl"));
-    ESP_ERROR_CHECK(mdns_service_add( "ESP32 BikeControl", "_openbikecontrol", "_tcp", OBC_TCP_PORT, NULL, 0));
-    mdns_txt_item_t txt[] = {
-        {"id", "1337"},
-        {"manufacturer", "ESP32"},
-        {"model", "BikeControl"},
-        {"name", "ESP32 BikeControl"},
-        {
-            "service-uuids",
-            "d273f680-d548-419d-b9d1-fa0472345229"
-        },
-        {"version", "0x01"}
-    };
-    ESP_ERROR_CHECK(mdns_service_txt_set("_openbikecontrol", "_tcp",txt, sizeof(txt) / sizeof(txt[0])));
-    ESP_LOGI(TAG, "mDNS: _openbikecontrol._tcp port=%d", OBC_TCP_PORT);
-}
-
 
 static void gatt_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {
 
@@ -499,8 +493,7 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     { 0 }
 };
 
-static void send_button(uint8_t button_id, uint8_t state)
-{
+static void send_button(uint8_t button_id, uint8_t state) {
     button_state[0] = MSG_BUTTON_STATE;
     button_state[1] = button_id;
     button_state[2] = state;
@@ -514,7 +507,6 @@ static void send_button(uint8_t button_id, uint8_t state)
         ESP_LOGI(TAG,"NOTIFY_CUSTOM: conn=%d attr=%d rc=%d", current_conn_handle, button_state_handle, rc);
     }
 }
-
 
 static void send_shift(uint8_t shift_id) {
     /* Press */
@@ -548,7 +540,6 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 current_conn_handle = event->connect.conn_handle;
-                // ble_connected = true;
                 ESP_LOGI(TAG, "BLE connected, handle=%d", current_conn_handle);               
             } else {
                 ESP_LOGW(TAG, "BLE connection failed, status=%d", event->connect.status);
@@ -557,7 +548,6 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
         return 0;
         case BLE_GAP_EVENT_DISCONNECT:
             notify_enabled = false;
-            // ble_connected = false;
             current_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             ESP_LOGI(TAG, "BLE disconnected, reason=%d", event->disconnect.reason);
             start_advertising();
@@ -601,9 +591,10 @@ static void start_advertising(void) {
     fields.uuids128 = (ble_uuid128_t *)&obc_service_uuid;
     fields.num_uuids128 = 1;
     fields.uuids128_is_complete = 1;
-    fields.name = (uint8_t *)ble_svc_gap_device_name();
-    fields.name_len = strlen(ble_svc_gap_device_name());
-    fields.name_is_complete = 1;
+
+    // fields.name = (uint8_t *)ble_svc_gap_device_name();
+    // fields.name_len = strlen(ble_svc_gap_device_name());
+    // fields.name_is_complete = 1;
 
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
@@ -622,13 +613,10 @@ static void start_advertising(void) {
         ESP_LOGI(TAG,"Service: d273f680-d548-419d-b9d1-fa0472345229");
     }
 }
-
 /* ------------------------------------------------------------------ */
 /* NimBLE synchronization                                               */
 /* ------------------------------------------------------------------ */
-
 static void on_sync(void) {
-
     /*
      * Infer an address type that the controller can use for advertising.
      */
@@ -659,59 +647,64 @@ static void nimble_host_task(void *param) {
 static void button_task(void *arg) {
 
     bool pressed = false;
-
     TickType_t press_start = 0;
-    bool shift_up_sent = false;
-    while (1) {
-        int level = gpio_get_level(BOOT_GPIO);
-        /* BOOT pressed */
+    bool long_press_sent = false;
+    bool very_long_press_sent = false;
 
+    while (1) {
+
+        int level = gpio_get_level(BOOT_GPIO);
+
+        /* BOOT pressed */
         if (!pressed && level == 0) {
             vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
             level = gpio_get_level(BOOT_GPIO);
             if (level == 0) {
                 pressed = true;
                 press_start = xTaskGetTickCount();
-                shift_up_sent = false;
+                long_press_sent = false;
+                very_long_press_sent = false;
                 ESP_LOGI(TAG, "BOOT pressed");
             }
         }
-        
-        // if (level == 0 && !pressed) {
-        //     vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
-        //     if (gpio_get_level(BOOT_GPIO) == 0) {
-        //         pressed = true;
-        //         press_start = xTaskGetTickCount();
-        //         shift_up_sent = false;
-        //         ESP_LOGI(TAG, "BOOT pressed");
-        //     }
-        // }
-        /* Button is being held */
         if (pressed) {
+            
             TickType_t elapsed = xTaskGetTickCount() - press_start;
             uint32_t elapsed_ms = pdTICKS_TO_MS(elapsed);
-            /* > 1 seconds -> SHIFT UP once */
-            if (elapsed_ms > LONG_PRESS_MS && !shift_up_sent) {
+
+            // > VERY_LONG_PRESS_MS -> additional 2x SHIFT UP 
+            if (elapsed_ms >= VERY_LONG_PRESS_MS && !very_long_press_sent) {
                 send_shift(SHIFT_UP);
-                shift_up_sent = true;
-                ESP_LOGI(TAG, "BOOT held >1s -> SHIFT UP");
+                vTaskDelay(pdMS_TO_TICKS(100));
+                send_shift(SHIFT_UP);
+                very_long_press_sent = true;
+                ESP_LOGI(TAG, "BOOT held >%dms -> total 3x SHIFT UP", VERY_LONG_PRESS_MS);
             }
-            /* Button released */
+
+            // > LONG_PRESS_MS -> SHIFT UP 
+            else if (elapsed_ms >= LONG_PRESS_MS && !long_press_sent) {
+                send_shift(SHIFT_UP);
+                long_press_sent = true;
+                ESP_LOGI(TAG, "BOOT held >%dms -> SHIFT UP", LONG_PRESS_MS);
+            }
+            // Button released 
             if (level != 0) {
                 pressed = false;
-                if (elapsed_ms < LONG_PRESS_MS) {
+                // short click
+                if (!long_press_sent &&
+                    elapsed_ms < LONG_PRESS_MS) {
                     send_shift(SHIFT_DOWN);
-                    ESP_LOGI(TAG, "BOOT held <1s -> SHIFT DOWN");
+                    ESP_LOGI(TAG, "BOOT held <%dms -> SHIFT DOWN", LONG_PRESS_MS);
                 }
             }
         }
+
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
     }
 }
 /* ------------------------------------------------------------------ */
 /* GATT init                                                            */
 /* ------------------------------------------------------------------ */
-
 static void gatt_svr_init(void) {
 
     int rc = ble_gatts_count_cfg(gatt_svr_svcs);
@@ -723,20 +716,19 @@ static void gatt_svr_init(void) {
         abort();
     }
 }
-
-
 /* ------------------------------------------------------------------ */
-/* app_main                                                             */
+/* app_main                                                           */
 /* ------------------------------------------------------------------ */
 void app_main(void) {
 
     vTaskDelay(pdMS_TO_TICKS(1000));
-    
+    esp_log_level_set("*", ESP_LOG_WARN);    //TAG
     ESP_LOGI(TAG, "====================================");
     ESP_LOGI(TAG, " ESP32 BikeControl");
     ESP_LOGI(TAG, " ESP-IDF + native NimBLE");
     ESP_LOGI(TAG, "====================================");
     ESP_LOGI(TAG, "FreeRTOS version: %s", tskKERNEL_VERSION_NUMBER);
+    
     /* NVS is required by the Bluetooth stack. */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

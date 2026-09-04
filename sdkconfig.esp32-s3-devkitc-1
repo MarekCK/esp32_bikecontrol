@@ -1,6 +1,6 @@
 #
 # Automatically generated file. DO NOT EDIT.
-# Espressif IoT Development Framework (ESP-IDF) 6.0.2 Project Configuration
+# Espressif IoT Development Framework (ESP-IDF) 6.0.1 Project Configuration
 #
 # default:
 CONFIG_SOC_ADC_SUPPORTED=y
@@ -429,8 +429,6 @@ CONFIG_SOC_UHCI_NUM=1
 # default:
 CONFIG_SOC_USB_OTG_PERIPH_NUM=1
 # default:
-CONFIG_SOC_USB_FSLS_PHY_NUM=1
-# default:
 CONFIG_SOC_SHA_DMA_MAX_BUFFER_SIZE=3968
 # default:
 CONFIG_SOC_SHA_SUPPORT_DMA=y
@@ -649,7 +647,7 @@ CONFIG_IDF_TARGET_ARCH="xtensa"
 # default:
 CONFIG_IDF_TARGET="esp32s3"
 # default:
-CONFIG_IDF_INIT_VERSION="6.0.2"
+CONFIG_IDF_INIT_VERSION="6.0.1"
 # default:
 CONFIG_IDF_TARGET_ESP32S3=y
 # default:
@@ -1078,42 +1076,6 @@ CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_CONTROLLER_ENABLED=y
 # default:
 # CONFIG_BT_CONTROLLER_DISABLED is not set
-
-#
-# Common Options
-#
-# default:
-CONFIG_BT_ALARM_MAX_NUM=50
-# default:
-CONFIG_BT_SMP_CRYPTO_STACK_TINYCRYPT=y
-# default:
-# CONFIG_BT_SMP_CRYPTO_STACK_MBEDTLS is not set
-
-#
-# BT Logs
-#
-
-#
-# Log Sources
-#
-# end of Log Sources
-
-# default:
-# CONFIG_BT_LOG_CRITICAL_ONLY is not set
-# default:
-# CONFIG_BLE_LOG_ENABLED is not set
-
-#
-# Legacy SPI Log Output (Deprecated - use BT Log Async Output instead)
-#
-# default:
-# CONFIG_BT_BLE_LOG_SPI_OUT_ENABLED is not set
-# end of Legacy SPI Log Output (Deprecated - use BT Log Async Output instead)
-# end of BT Logs
-
-# default:
-# CONFIG_BT_LE_USED_MEM_STATISTICS_ENABLED is not set
-# end of Common Options
 
 #
 # NimBLE Options
@@ -1665,16 +1627,37 @@ CONFIG_BT_CTRL_BLE_SECURITY_ENABLE=y
 CONFIG_BT_CTRL_BLE_ADV=y
 # default:
 # CONFIG_BT_CTRL_CHECK_CONNECT_IND_ACCESS_ADDRESS is not set
-# default:
-CONFIG_BT_CTRL_BLE_MIN_CONN_INTERVAL_ENABLE=y
 
 #
 # Controller debug log Options (Experimental)
 #
-# default:
-# CONFIG_BT_CTRL_LE_LOG_EN is not set
 # end of Controller debug log Options (Experimental)
 # end of Controller Options
+
+#
+# Common Options
+#
+# default:
+CONFIG_BT_ALARM_MAX_NUM=50
+# default:
+CONFIG_BT_SMP_CRYPTO_STACK_TINYCRYPT=y
+# default:
+# CONFIG_BT_SMP_CRYPTO_STACK_MBEDTLS is not set
+
+#
+# BLE Log
+#
+# default:
+# CONFIG_BLE_LOG_ENABLED is not set
+# end of BLE Log
+
+# default:
+# CONFIG_BT_BLE_LOG_SPI_OUT_ENABLED is not set
+# default:
+# CONFIG_BT_BLE_LOG_UHCI_OUT_ENABLED is not set
+# default:
+# CONFIG_BT_LE_USED_MEM_STATISTICS_ENABLED is not set
+# end of Common Options
 
 # default:
 # CONFIG_BT_HCI_LOG_DEBUG_EN is not set
@@ -2403,8 +2386,6 @@ CONFIG_ESP_PHY_PLL_TRACK_PERIOD_MS=1000
 CONFIG_ESP_PHY_IRAM_OPT=y
 # default:
 # CONFIG_ESP_PHY_DEBUG is not set
-# default:
-CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=y
 # end of PHY
 
 #
@@ -3627,6 +3608,8 @@ CONFIG_MBEDTLS_TLS_SERVER_AND_CLIENT=y
 # default:
 # CONFIG_MBEDTLS_TLS_CLIENT_ONLY is not set
 # default:
+# CONFIG_MBEDTLS_TLS_DISABLED is not set
+# default:
 # CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is not set
 # default:
 # CONFIG_MBEDTLS_SSL_CONTEXT_SERIALIZATION is not set
@@ -3711,6 +3694,8 @@ CONFIG_MBEDTLS_CMAC_C=y
 #
 # Asymmetric Ciphers
 #
+# default:
+CONFIG_MBEDTLS_BIGNUM_C=y
 # default:
 CONFIG_MBEDTLS_RSA_C=y
 # default:
@@ -4333,7 +4318,7 @@ CONFIG_BT_NIMBLE_HCI_EVT_HI_BUF_COUNT=30
 CONFIG_BT_NIMBLE_HCI_EVT_LO_BUF_COUNT=8
 CONFIG_NIMBLE_SVC_GAP_DEVICE_NAME="nimble"
 CONFIG_NIMBLE_GAP_DEVICE_NAME_MAX_LEN=31
-CONFIG_NIMBLE_SVC_GAP_APPEARANCE=0x0
+CONFIG_NIMBLE_SVC_GAP_APPEARANCE=0
 # CONFIG_NIMBLE_MESH is not set
 # CONFIG_NIMBLE_DEBUG is not set
 # CONFIG_BT_NIMBLE_COEX_PHY_CODED_TX_RX_TLIM_EN is not set
